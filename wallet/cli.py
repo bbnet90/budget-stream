@@ -10,10 +10,11 @@ from rich.table import Table
 from . import __version__
 from .budget_service import BudgetService
 from .category_service import CategoryService
+from .dashboard_service import DashboardService
 from .db import initialize_database
 from .expense_service import ExpenseService
 from .income_service import IncomeService
-from .services import current_month_label, get_dashboard_snapshot
+from .services import current_month_label
 
 app = typer.Typer(
     help="Personal budget management CLI.",
@@ -42,40 +43,57 @@ def main(
     ),
 ):
     if ctx.invoked_subcommand is None:
-        initialize_database()
-        snapshot = get_dashboard_snapshot()
-        month_label = snapshot["month_label"]
-
-        if not snapshot["budget_configured"]:
-            console.print(Panel.fit(
-                f"[bold]BudgetStream[/bold]\n{month_label}\n\n[yellow]No budget configured yet.[/yellow]\n[dim]Use 'wallet budget set --amount 3000' to begin.[/dim]",
-                border_style="cyan",
-            ))
-            return
-
-        console.print(Panel.fit(
-            f"[bold]BudgetStream[/bold]\n{month_label}\n\nBudget: {snapshot['budget_amount']}\n[dim]Monthly budget is configured.[/dim]",
-            border_style="green",
-        ))
+        render_dashboard()
 
 
 @app.command("dashboard")
 def dashboard():
+    render_dashboard()
+
+
+def render_dashboard() -> None:
     initialize_database()
-    snapshot = get_dashboard_snapshot()
-    month_label = snapshot["month_label"]
+    summary = DashboardService().get_monthly_summary()
+    month_label = summary["month_label"]
 
-    if not snapshot["budget_configured"]:
-        console.print(Panel.fit(
-            f"[bold]BudgetStream[/bold]\n{month_label}\n\n[yellow]No budget configured yet.[/yellow]\n[dim]Use 'wallet budget set --amount 3000' to begin.[/dim]",
-            border_style="cyan",
-        ))
-        return
+    summary_lines = [
+        "[bold]BudgetStream[/bold]",
+        month_label,
+        "",
+        f"Total income: {summary['total_income']:,.0f}",
+        f"Monthly budget: {summary['budget']:,.0f}",
+        f"Total expenses: {summary['total_expenses']:,.0f}",
+        f"Expense Count: {summary['expense_count']}",
+        f"Budget Usage: {summary['budget_usage_percentage']:.1f}%",
+        f"Remaining budget: {summary['remaining_budget']:,.0f}",
+        f"Required expenses: {summary['required_expenses']:,.0f}",
+        f"Discretionary expenses: {summary['discretionary_expenses']:,.0f}",
+    ]
 
-    console.print(Panel.fit(
-        f"[bold]BudgetStream[/bold]\n{month_label}\n\nBudget: {snapshot['budget_amount']}\n[dim]Monthly budget is configured.[/dim]",
-        border_style="green",
-    ))
+    console.print(Panel.fit("\n".join(summary_lines), border_style="green"))
+
+    if summary["category_totals"]:
+        category_table = Table(title="Category totals")
+        category_table.add_column("Category", style="cyan")
+        category_table.add_column("Total", style="green", justify="right")
+        for item in summary["category_totals"]:
+            category_table.add_row(item["category"], f"{item['total']:,.0f}")
+        console.print(category_table)
+
+    if summary["recent_expenses"]:
+        expense_table = Table(title="Recent expenses")
+        expense_table.add_column("Date")
+        expense_table.add_column("Category", style="cyan")
+        expense_table.add_column("Amount", style="magenta", justify="right")
+        expense_table.add_column("Required")
+        for item in summary["recent_expenses"]:
+            expense_table.add_row(
+                item["date"],
+                item["category"],
+                f"{item['amount']:,.0f}",
+                "Yes" if item["is_required"] else "No",
+            )
+        console.print(expense_table)
 
 
 category_app = typer.Typer(help="Manage expense categories.")

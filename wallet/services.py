@@ -14,22 +14,24 @@ def current_month_label() -> str:
 
 
 def get_dashboard_snapshot(month: str | None = None) -> dict:
+    from .dashboard_service import DashboardService
+
     target_month = month or current_month_key()
-    budget = get_budget_for_month(target_month)
-
-    month_label = date.fromisoformat(f"{target_month}-01").strftime("%B %Y")
-
-    if budget is None:
-        return {
-            "month": target_month,
-            "month_label": month_label,
-            "budget_configured": False,
-            "budget_amount": None,
-        }
+    summary = DashboardService().get_monthly_summary(target_month)
 
     return {
-        "month": target_month,
-        "month_label": month_label,
-        "budget_configured": True,
-        "budget_amount": budget["monthly_budget"],
+        "month": summary["month"],
+        "month_label": summary["month_label"],
+        "budget_configured": summary["budget_configured"],
+        "budget_amount": summary["budget"],
+        "total_income": summary["total_income"],
+        "monthly_budget": summary["budget"],
+        "total_expenses": summary["total_expenses"],
+        "required_expenses": summary["required_expenses"],
+        "discretionary_expenses": summary["discretionary_expenses"],
+        "expense_count": summary["expense_count"],
+        "remaining_budget": summary["remaining_budget"],
+        "budget_usage_percentage": summary["budget_usage_percentage"],
+        "category_totals": summary["category_totals"],
+        "recent_expenses": summary["recent_expenses"],
     }
