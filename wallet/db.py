@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS income (
 CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    default_kind TEXT NOT NULL CHECK(default_kind IN ('required', 'discretionary')),
+    kind TEXT NOT NULL CHECK(kind IN ('required', 'discretionary')),
     is_default INTEGER NOT NULL DEFAULT 0 CHECK(is_default IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -43,6 +43,19 @@ CREATE TABLE IF NOT EXISTS expenses (
 """
 
 
+DEFAULT_CATEGORIES = [
+    ("Food", "discretionary"),
+    ("Housing", "required"),
+    ("Utilities", "required"),
+    ("Transport", "discretionary"),
+    ("Health", "required"),
+    ("Entertainment", "discretionary"),
+    ("Shopping", "discretionary"),
+    ("Savings", "required"),
+    ("Other", "discretionary"),
+]
+
+
 def initialize_database() -> Path:
     db_path = get_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,5 +63,13 @@ def initialize_database() -> Path:
     with sqlite3.connect(db_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON;")
         connection.executescript(SCHEMA)
+
+        for name, kind in DEFAULT_CATEGORIES:
+            connection.execute(
+                "INSERT OR IGNORE INTO categories (name, kind, is_default) VALUES (?, ?, 1)",
+                (name, kind),
+            )
+
+        connection.commit()
 
     return db_path
