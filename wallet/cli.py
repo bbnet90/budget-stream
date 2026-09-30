@@ -8,8 +8,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import __version__
+from .budget_service import BudgetService
 from .category_service import CategoryService
 from .db import initialize_database
+from .income_service import IncomeService
 from .services import current_month_label, get_dashboard_snapshot
 
 app = typer.Typer(
@@ -132,6 +134,84 @@ def category_remove(
         raise typer.Exit(code=1)
 
     typer.secho(f'✓ Category "{name}" removed.', fg=typer.colors.GREEN)
+
+
+budget_app = typer.Typer(help="Manage the monthly budget.")
+app.add_typer(budget_app, name="budget")
+
+
+@budget_app.command("set")
+def budget_set(
+    amount: float = typer.Option(..., "--amount", help="Monthly budget amount."),
+):
+    initialize_database()
+
+    try:
+        budget = BudgetService().set_budget(amount)
+    except ValueError as exc:
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    month_label = current_month_label()
+    typer.secho(f'✓ Monthly budget set for {month_label}: {budget["monthly_budget"]:,.0f}', fg=typer.colors.GREEN)
+
+
+@budget_app.command("show")
+def budget_show():
+    initialize_database()
+    budget = BudgetService().get_current_budget()
+
+    if budget is None:
+        typer.secho(f"No budget is set for {current_month_label()}.", fg=typer.colors.YELLOW)
+        return
+
+    table = Table(title="Monthly Budget")
+    table.add_column("Month", style="cyan")
+    table.add_column("Budget", style="green", justify="right")
+    table.add_row(current_month_label(), f"{budget['monthly_budget']:,.0f}")
+    console.print(table)
+
+
+income_app = typer.Typer(help="Manage monthly income.")
+app.add_typer(income_app, name="income")
+
+
+@income_app.command("add")
+def income_add(
+    source: str = typer.Option(..., "--source", help="Income source name."),
+    amount: float = typer.Option(..., "--amount", help="Income amount."),
+):
+    initialize_database()
+
+    try:
+        income = IncomeService().add_income(source, amount)
+    except ValueError as exc:
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    typer.secho(
+        f'✓ Income added for {income["source_name"]}: {income["amount"]:,.0f}',
+        fg=typer.colors.GREEN,
+    )
+
+
+@income_app.command("list")
+def income_list():
+    initialize_database()
+    entries = IncomeService().list_current_month_income()
+
+    if not entries:
+        typer.secho(f"No income entries for {current_month_label()}.", fg=typer.colors.YELLOW)
+        return
+
+    table = Table(title="Income")
+    table.add_column("Source", style="cyan")
+    table.add_column("Amount", style="green", justify="right")
+
+    for entry in entries:
+        table.add_row(entry["source_name"], f"{entry['amount']:,.0f}")
+
+    console.print(table)
 
 
 if __name__ == "__main__":
