@@ -11,6 +11,7 @@ from . import __version__
 from .budget_service import BudgetService
 from .category_service import CategoryService
 from .db import initialize_database
+from .expense_service import ExpenseService
 from .income_service import IncomeService
 from .services import current_month_label, get_dashboard_snapshot
 
@@ -212,6 +213,75 @@ def income_list():
         table.add_row(entry["source_name"], f"{entry['amount']:,.0f}")
 
     console.print(table)
+
+
+expense_app = typer.Typer(help="Manage monthly expenses.")
+app.add_typer(expense_app, name="expense")
+
+
+@expense_app.command("add")
+def expense_add(
+    amount: float = typer.Option(..., "--amount", help="Expense amount."),
+    category: str = typer.Option(..., "--category", help="Existing category name."),
+    description: Optional[str] = typer.Option(None, "--description", help="Optional expense description."),
+):
+    initialize_database()
+
+    try:
+        expense = ExpenseService().add_expense(amount, category, description=description)
+    except ValueError as exc:
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    typer.secho(
+        f'✓ Expense added: {expense["amount"]:,.0f} — {expense["category_name"]}',
+        fg=typer.colors.GREEN,
+    )
+
+
+@expense_app.command("list")
+def expense_list():
+    initialize_database()
+    expenses = ExpenseService().list_current_month_expenses()
+
+    if not expenses:
+        typer.secho(f"No expenses for {current_month_label()}.", fg=typer.colors.YELLOW)
+        return
+
+    table = Table(title="Expenses")
+    table.add_column("ID", justify="right")
+    table.add_column("Date")
+    table.add_column("Category", style="cyan")
+    table.add_column("Amount", justify="right", style="magenta")
+    table.add_column("Description")
+    table.add_column("Required")
+
+    for expense in expenses:
+        table.add_row(
+            str(expense["id"]),
+            expense["expense_date"],
+            expense["category_name"],
+            f"{expense['amount']:,.0f}",
+            expense["description"] or "",
+            "Yes" if expense["is_required"] else "No",
+        )
+
+    console.print(table)
+
+
+@expense_app.command("delete")
+def expense_delete(
+    expense_id: int = typer.Option(..., "--id", help="Expense ID to delete."),
+):
+    initialize_database()
+
+    try:
+        ExpenseService().delete_expense(expense_id)
+    except ValueError as exc:
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    typer.secho(f"✓ Expense #{expense_id} deleted.", fg=typer.colors.GREEN)
 
 
 if __name__ == "__main__":
