@@ -14,6 +14,7 @@ from .dashboard_service import DashboardService
 from .db import initialize_database
 from .expense_service import ExpenseService
 from .income_service import IncomeService
+from .recurring_service import RecurringService
 from .report_service import ReportService
 from .services import current_month_label
 
@@ -353,6 +354,111 @@ def expense_delete(
         raise typer.Exit(code=1)
 
     typer.secho(f"✓ Expense #{expense_id} deleted.", fg=typer.colors.GREEN)
+
+
+recurring_app = typer.Typer(help="Manage recurring income and expense definitions.")
+app.add_typer(recurring_app, name="recurring")
+
+
+@recurring_app.command("add")
+def recurring_add(
+    type_: str = typer.Option(..., "--type", help="income or expense"),
+    source: Optional[str] = typer.Option(None, "--source", help="Income source name."),
+    category: Optional[str] = typer.Option(None, "--category", help="Expense category name."),
+    amount: float = typer.Option(..., "--amount", help="Recurring amount."),
+    description: Optional[str] = typer.Option(None, "--description", help="Optional recurring description."),
+    frequency: str = typer.Option("monthly", "--frequency", help="Recurring cadence."),
+    next_run: str = typer.Option(..., "--next-run", help="Next run date in YYYY-MM-DD format."),
+):
+    initialize_database()
+
+    try:
+        entry = RecurringService().add_recurring(
+            type_=type_,
+            source_name=source,
+            category_name=category,
+            amount=amount,
+            description=description,
+            frequency=frequency,
+            next_run_date=next_run,
+        )
+    except ValueError as exc:
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    label = entry["source_name"] or entry["category_name"] or entry["description"] or "Recurring"
+    typer.secho(f'✓ Recurring {entry["type"]} added: {label}', fg=typer.colors.GREEN)
+
+
+@recurring_app.command("list")
+def recurring_list():
+    initialize_database()
+    entries = RecurringService().list_recurring()
+
+    if not entries:
+        typer.secho("No recurring transactions configured.", fg=typer.colors.YELLOW)
+        return
+
+    table = Table(title="Recurring Transactions")
+    table.add_column("ID", justify="right")
+    table.add_column("Type", style="cyan")
+    table.add_column("Source / Category", style="magenta")
+    table.add_column("Amount", justify="right", style="green")
+    table.add_column("Next Run", style="yellow")
+    table.add_column("Status")
+
+    for entry in entries:
+        name = entry["source_name"] or entry["category_name"] or "-"
+        status = "Active" if entry["is_active"] else "Inactive"
+        table.add_row(
+            str(entry["id"]),
+            entry["type"].title(),
+            name,
+            f"{entry['amount']:,.0f}",
+            entry["next_run_date"],
+            status,
+        )
+
+    console.print(table)
+
+
+@recurring_app.command("enable")
+def recurring_enable(
+    recurring_id: int = typer.Option(..., "--id", help="Recurring ID to enable."),
+):
+    initialize_database()
+    RecurringService().enable_recurring(recurring_id)
+    typer.secho(f"✓ Recurring #{recurring_id} enabled.", fg=typer.colors.GREEN)
+
+
+@recurring_app.command("disable")
+def recurring_disable(
+    recurring_id: int = typer.Option(..., "--id", help="Recurring ID to disable."),
+):
+    initialize_database()
+    RecurringService().disable_recurring(recurring_id)
+    typer.secho(f"✓ Recurring #{recurring_id} disabled.", fg=typer.colors.GREEN)
+
+
+@recurring_app.command("delete")
+def recurring_delete(
+    recurring_id: int = typer.Option(..., "--id", help="Recurring ID to delete."),
+):
+    initialize_database()
+    RecurringService().delete_recurring(recurring_id)
+    typer.secho(f"✓ Recurring #{recurring_id} deleted.", fg=typer.colors.GREEN)
+
+
+@recurring_app.command("apply")
+def recurring_apply():
+    initialize_database()
+    applied = RecurringService().apply_due_recurring()
+    if not applied:
+        typer.secho("No recurring transactions were due to apply; nothing was applied.", fg=typer.colors.YELLOW)
+        return
+
+    count = len(applied)
+    typer.secho(f"✓ Applied {count} recurring transaction(s).", fg=typer.colors.GREEN)
 
 
 if __name__ == "__main__":

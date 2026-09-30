@@ -40,12 +40,28 @@ CREATE TABLE IF NOT EXISTS expenses (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(category_id) REFERENCES categories(id)
 );
+
+CREATE TABLE IF NOT EXISTS recurring_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL CHECK(type IN ('income', 'expense')),
+    source_name TEXT,
+    category_id INTEGER,
+    amount REAL NOT NULL CHECK(amount > 0),
+    description TEXT,
+    frequency TEXT NOT NULL CHECK(frequency = 'monthly'),
+    next_run_date TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(category_id) REFERENCES categories(id)
+);
 """
 
 
 DEFAULT_CATEGORIES = [
     ("Food", "discretionary"),
     ("Housing", "required"),
+    ("Rent", "required"),
     ("Utilities", "required"),
     ("Transport", "discretionary"),
     ("Health", "required"),
@@ -54,6 +70,13 @@ DEFAULT_CATEGORIES = [
     ("Savings", "required"),
     ("Other", "discretionary"),
 ]
+
+
+def get_connection() -> sqlite3.Connection:
+    connection = sqlite3.connect(get_db_path())
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON;")
+    return connection
 
 
 def initialize_database() -> Path:
