@@ -14,6 +14,7 @@ from .dashboard_service import DashboardService
 from .db import initialize_database
 from .expense_service import ExpenseService
 from .income_service import IncomeService
+from .report_service import ReportService
 from .services import current_month_label
 
 app = typer.Typer(
@@ -49,6 +50,56 @@ def main(
 @app.command("dashboard")
 def dashboard():
     render_dashboard()
+
+
+@app.command("report")
+def report():
+    initialize_database()
+    report_data = ReportService().get_current_report()
+
+    income_vs_expense = Table(title="Income vs Expense")
+    income_vs_expense.add_column("Metric", style="cyan")
+    income_vs_expense.add_column("Value", style="green", justify="right")
+    income_vs_expense.add_row("Total Income", f"{report_data['income_vs_expense']['total_income']:,.2f}")
+    income_vs_expense.add_row("Total Expenses", f"{report_data['income_vs_expense']['total_expenses']:,.2f}")
+    income_vs_expense.add_row("Net Cash Flow", f"{report_data['income_vs_expense']['net_cash_flow']:,.2f}")
+    income_vs_expense.add_row("Expense-to-Income %", f"{report_data['income_vs_expense']['expense_to_income_percentage']:.2f}%")
+    console.print(income_vs_expense)
+
+    expense_breakdown = Table(title="Expense Breakdown")
+    expense_breakdown.add_column("Metric", style="cyan")
+    expense_breakdown.add_column("Value", style="green", justify="right")
+    expense_breakdown.add_row("Required Expenses", f"{report_data['expense_breakdown']['required_expenses']:,.2f}")
+    expense_breakdown.add_row("Discretionary Expenses", f"{report_data['expense_breakdown']['discretionary_expenses']:,.2f}")
+    expense_breakdown.add_row("Required Share %", f"{report_data['expense_breakdown']['required_share_percentage']:.2f}%")
+    expense_breakdown.add_row("Discretionary Share %", f"{report_data['expense_breakdown']['discretionary_share_percentage']:.2f}%")
+    console.print(expense_breakdown)
+
+    budget_comparison = Table(title="Budget Comparison")
+    budget_comparison.add_column("Metric", style="cyan")
+    budget_comparison.add_column("Value", style="green", justify="right")
+    budget_comparison.add_row("Monthly Budget", f"{report_data['budget_comparison']['monthly_budget']:,.2f}")
+    budget_comparison.add_row("Total Expenses", f"{report_data['budget_comparison']['total_expenses']:,.2f}")
+    budget_comparison.add_row("Remaining Budget", f"{report_data['budget_comparison']['remaining_budget']:,.2f}")
+    budget_comparison.add_row("Budget Usage %", f"{report_data['budget_comparison']['budget_usage_percentage']:.2f}%")
+    console.print(budget_comparison)
+
+    if report_data["category_spending"]:
+        category_table = Table(title="Category Spending")
+        category_table.add_column("Category", style="cyan")
+        category_table.add_column("Amount", style="green", justify="right")
+        category_table.add_column("% of Total", style="magenta", justify="right")
+
+        for item in report_data["category_spending"]:
+            category_table.add_row(
+                item["category"],
+                f"{item['amount']:,.2f}",
+                f"{item['percentage_of_total_expenses']:.2f}%",
+            )
+
+        console.print(category_table)
+    else:
+        console.print("No expenses recorded for the current month.")
 
 
 def render_dashboard() -> None:
