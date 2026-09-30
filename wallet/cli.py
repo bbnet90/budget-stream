@@ -66,6 +66,8 @@ def render_dashboard() -> None:
         f"Expense Count: {summary['expense_count']}",
         f"Budget Usage: {summary['budget_usage_percentage']:.1f}%",
         f"Remaining budget: {summary['remaining_budget']:,.0f}",
+        f"Days Remaining: {summary['days_remaining']}",
+        f"Daily Available: {summary['daily_available']:,.2f}",
         f"Required expenses: {summary['required_expenses']:,.0f}",
         f"Discretionary expenses: {summary['discretionary_expenses']:,.0f}",
     ]

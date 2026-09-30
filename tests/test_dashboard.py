@@ -1,3 +1,5 @@
+from datetime import date
+
 from typer.testing import CliRunner
 
 from wallet.cli import app
@@ -30,6 +32,8 @@ def test_dashboard_summary_calculates_monthly_financial_totals(tmp_path, monkeyp
     assert summary["remaining_budget"] == 3300
     assert summary["expense_count"] == 3
     assert summary["budget_usage_percentage"] == 34.0
+    assert summary["days_remaining"] >= 1
+    assert summary["daily_available"] > 0
     assert len(summary["category_totals"]) >= 3
     assert len(summary["recent_expenses"]) == 3
 
@@ -49,6 +53,8 @@ def test_dashboard_summary_handles_empty_month_without_budget(tmp_path, monkeypa
     assert summary["remaining_budget"] == 0
     assert summary["expense_count"] == 0
     assert summary["budget_usage_percentage"] == 0
+    assert summary["days_remaining"] >= 1
+    assert summary["daily_available"] == 0
     assert summary["category_totals"] == []
     assert summary["recent_expenses"] == []
 
@@ -70,6 +76,8 @@ def test_root_wallet_command_renders_dashboard_summary(tmp_path, monkeypatch):
     assert "Total income" in result.output
     assert "Expense Count" in result.output
     assert "Budget Usage" in result.output
+    assert "Days Remaining" in result.output
+    assert "Daily Available" in result.output
     assert "Remaining budget" in result.output
 
 
@@ -82,7 +90,48 @@ def test_dashboard_summary_tracks_overspending_usage_above_100_percent(tmp_path,
     ExpenseService().add_expense(20000, "Food")
     ExpenseService().add_expense(27000, "Housing")
 
-    summary = DashboardService().get_monthly_summary()
+    summary = DashboardService().get_monthly_summary(today=date(2026, 9, 16))
 
     assert summary["budget_usage_percentage"] > 100
     assert summary["remaining_budget"] < 0
+    assert summary["daily_available"] < 0
+    assert summary["days_remaining"] == 15
+
+
+def test_dashboard_daily_available_uses_zero_budget_and_no_division_by_zero(tmp_path, monkeypatch):
+    db_path = tmp_path / "wallet.db"
+    monkeypatch.setenv("WALLET_DB_PATH", str(db_path))
+    initialize_database()
+
+    summary = DashboardService().get_monthly_summary(month="2026-09", today=date(2026, 9, 16))
+
+    assert summary["budget"] == 0
+    assert summary["daily_available"] == 0
+    assert summary["days_remaining"] == 15
+
+
+def test_dashboard_daily_available_handles_missing_budget_record_safely(tmp_path, monkeypatch):
+    db_path = tmp_path / "wallet.db"
+    monkeypatch.setenv("WALLET_DB_PATH", str(db_path))
+    initialize_database()
+
+    summary = DashboardService().get_monthly_summary(today=date(2026, 9, 16))
+
+    assert summary["budget"] == 0
+    assert summary["remaining_budget"] == 0
+    assert summary["daily_available"] == 0
+    assert summary["days_remaining"] == 15
+
+
+def test_dashboard_daily_available_uses_single_day_remaining_on_final_day(tmp_path, monkeypatch):
+    db_path = tmp_path / "wallet.db"
+    monkeypatch.setenv("WALLET_DB_PATH", str(db_path))
+    initialize_database()
+
+    BudgetService().set_budget(30000)
+    ExpenseService().add_expense(7000, "Food")
+
+    summary = DashboardService().get_monthly_summary(today=date(2026, 9, 30))
+
+    assert summary["days_remaining"] == 1
+    assert summary["daily_available"] == 23000

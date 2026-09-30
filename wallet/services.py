@@ -31,6 +31,8 @@ def get_dashboard_snapshot(month: str | None = None) -> dict:
         "discretionary_expenses": summary["discretionary_expenses"],
         "expense_count": summary["expense_count"],
         "remaining_budget": summary["remaining_budget"],
+        "days_remaining": summary["days_remaining"],
+        "daily_available": summary["daily_available"],
         "budget_usage_percentage": summary["budget_usage_percentage"],
         "category_totals": summary["category_totals"],
         "recent_expenses": summary["recent_expenses"],
