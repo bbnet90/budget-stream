@@ -86,9 +86,9 @@ def test_dashboard_summary_tracks_overspending_usage_above_100_percent(tmp_path,
     monkeypatch.setenv("WALLET_DB_PATH", str(db_path))
     initialize_database()
 
-    BudgetService().set_budget(30000)
-    ExpenseService().add_expense(20000, "Food")
-    ExpenseService().add_expense(27000, "Housing")
+    BudgetService().set_budget(30000, month="2026-09")
+    ExpenseService().add_expense(20000, "Food", expense_date="2026-09-01")
+    ExpenseService().add_expense(27000, "Housing", expense_date="2026-09-01")
 
     summary = DashboardService().get_monthly_summary(today=date(2026, 9, 16))
 
@@ -128,8 +128,8 @@ def test_dashboard_daily_available_uses_single_day_remaining_on_final_day(tmp_pa
     monkeypatch.setenv("WALLET_DB_PATH", str(db_path))
     initialize_database()
 
-    BudgetService().set_budget(30000)
-    ExpenseService().add_expense(7000, "Food")
+    BudgetService().set_budget(30000, month="2026-09")
+    ExpenseService().add_expense(7000, "Food", expense_date="2026-09-01")
 
     summary = DashboardService().get_monthly_summary(today=date(2026, 9, 30))
 

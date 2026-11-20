@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .income_repository import IncomeRepository
-from .services import current_month_key
+from .services import current_month_key, month_start, positive_amount
 
 
 class IncomeService:
@@ -17,15 +17,12 @@ class IncomeService:
 
     @staticmethod
     def validate_amount(amount: float) -> float:
-        cleaned = float(amount)
-        if cleaned <= 0:
-            raise ValueError("Income amount must be greater than 0.")
-        return cleaned
+        return positive_amount(amount, "Income")
 
     def add_income(self, source_name: str, amount: float, month: str | None = None) -> dict:
         cleaned_source = self.validate_source(source_name)
         validated_amount = self.validate_amount(amount)
-        target_month = month or current_month_key()
+        target_month = current_month_key() if month is None else month_start(month).isoformat()[:7]
         return self.repository.add_income(target_month, cleaned_source, validated_amount)
 
     def list_current_month_income(self) -> list[dict]:

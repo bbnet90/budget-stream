@@ -142,10 +142,14 @@ def test_recurring_can_be_disabled_and_enabled(tmp_path, monkeypatch):
     )
 
     RecurringService().disable_recurring(recurring["id"])
-    assert RecurringService().get_recurring_by_id(recurring["id"])["is_active"] == 0
+    disabled = RecurringService().get_recurring_by_id(recurring["id"])
+    assert disabled is not None
+    assert disabled["is_active"] == 0
 
     RecurringService().enable_recurring(recurring["id"])
-    assert RecurringService().get_recurring_by_id(recurring["id"])["is_active"] == 1
+    enabled = RecurringService().get_recurring_by_id(recurring["id"])
+    assert enabled is not None
+    assert enabled["is_active"] == 1
 
 
 def test_recurring_can_be_deleted_without_harming_history(tmp_path, monkeypatch):
@@ -167,6 +171,23 @@ def test_recurring_can_be_deleted_without_harming_history(tmp_path, monkeypatch)
     assert IncomeService().list_current_month_income()[0]["amount"] == 1000
 
 
+def test_recurring_invalid_id_raises_value_error(tmp_path, monkeypatch):
+    db_path = tmp_path / "wallet.db"
+    monkeypatch.setenv("WALLET_DB_PATH", str(db_path))
+    initialize_database()
+
+    for action in (
+        lambda: RecurringService().enable_recurring(999999),
+        lambda: RecurringService().disable_recurring(999999),
+        lambda: RecurringService().delete_recurring(999999),
+    ):
+        try:
+            action()
+            assert False
+        except ValueError as exc:
+            assert "does not exist" in str(exc)
+
+
 def test_recurring_apply_creates_income_record(tmp_path, monkeypatch):
     db_path = tmp_path / "wallet.db"
     monkeypatch.setenv("WALLET_DB_PATH", str(db_path))
@@ -183,8 +204,10 @@ def test_recurring_apply_creates_income_record(tmp_path, monkeypatch):
     applied = RecurringService().apply_due_recurring(today=date(2026, 9, 30))
 
     assert applied[0]["type"] == "income"
-    assert len(IncomeService().list_current_month_income()) == 1
-    assert IncomeService().list_current_month_income()[0]["amount"] == 45000
+    september_income = IncomeService().repository.list_by_month("2026-09")
+    assert len(september_income) == 1
+    assert september_income[0]["amount"] == 45000
+    assert september_income[0]["month"] == "2026-09"
     assert RecurringService().list_recurring()[0]["next_run_date"] == "2026-10-01"
 
 
@@ -204,10 +227,11 @@ def test_recurring_apply_creates_expense_record(tmp_path, monkeypatch):
 
     RecurringService().apply_due_recurring(today=date(2026, 9, 30))
 
-    expenses = ExpenseService().list_current_month_expenses()
-    assert len(expenses) == 1
-    assert expenses[0]["amount"] == 15000
-    assert expenses[0]["category_name"] == "Rent"
+    september_expenses = ExpenseService().repository.list_by_month("2026-09")
+    assert len(september_expenses) == 1
+    assert september_expenses[0]["amount"] == 15000
+    assert september_expenses[0]["category_name"] == "Rent"
+    assert september_expenses[0]["expense_date"] == "2026-09-01"
 
 
 def test_recurring_inactive_and_future_are_ignored(tmp_path, monkeypatch):
@@ -234,7 +258,9 @@ def test_recurring_inactive_and_future_are_ignored(tmp_path, monkeypatch):
         next_run_date="2026-12-01",
     )
     RecurringService().apply_due_recurring(today=date(2026, 9, 30))
-    assert RecurringService().get_recurring_by_id(future["id"])["next_run_date"] == "2026-12-01"
+    saved_future = RecurringService().get_recurring_by_id(future["id"])
+    assert saved_future is not None
+    assert saved_future["next_run_date"] == "2026-12-01"
 
 
 def test_recurring_apply_is_idempotent(tmp_path, monkeypatch):
@@ -250,13 +276,15 @@ def test_recurring_apply_is_idempotent(tmp_path, monkeypatch):
         next_run_date="2026-09-01",
     )
 
-    RecurringService().apply_due_recurring(today=date(2026, 9, 30))
-    first = len(IncomeService().list_current_month_income())
-    RecurringService().apply_due_recurring(today=date(2026, 9, 30))
-    second = len(IncomeService().list_current_month_income())
+    first_applied = RecurringService().apply_due_recurring(today=date(2026, 9, 30))
+    first = IncomeService().repository.list_by_month("2026-09")
+    second_applied = RecurringService().apply_due_recurring(today=date(2026, 9, 30))
+    second = IncomeService().repository.list_by_month("2026-09")
 
-    assert first == 1
-    assert second == 1
+    assert len(first_applied) == 1
+    assert len(first) == 1
+    assert second_applied == []
+    assert len(second) == 1
 
 
 def test_recurring_monthly_catch_up_and_month_end_rollover(tmp_path, monkeypatch):

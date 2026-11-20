@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 from datetime import date
+from math import isfinite
 
 from .repositories import get_budget_for_month
 
 
-def current_month_key() -> str:
-    return date.today().strftime("%Y-%m")
+def positive_amount(amount: float, label: str) -> float:
+    value = float(amount)
+    if not isfinite(value) or value <= 0:
+        raise ValueError(f"{label} amount must be finite and greater than 0.")
+    return value
+
+
+def month_start(month: str) -> date:
+    try:
+        return date.fromisoformat(f"{month}-01")
+    except ValueError as exc:
+        raise ValueError("Month must be a valid calendar month (YYYY-MM).") from exc
+
+
+def current_month_key(today: date | None = None) -> str:
+    return (today or date.today()).isoformat()[:7]
 
 
 def current_month_label() -> str:
@@ -16,24 +31,6 @@ def current_month_label() -> str:
 def get_dashboard_snapshot(month: str | None = None) -> dict:
     from .dashboard_service import DashboardService
 
-    target_month = month or current_month_key()
-    summary = DashboardService().get_monthly_summary(target_month)
-
-    return {
-        "month": summary["month"],
-        "month_label": summary["month_label"],
-        "budget_configured": summary["budget_configured"],
-        "budget_amount": summary["budget"],
-        "total_income": summary["total_income"],
-        "monthly_budget": summary["budget"],
-        "total_expenses": summary["total_expenses"],
-        "required_expenses": summary["required_expenses"],
-        "discretionary_expenses": summary["discretionary_expenses"],
-        "expense_count": summary["expense_count"],
-        "remaining_budget": summary["remaining_budget"],
-        "days_remaining": summary["days_remaining"],
-        "daily_available": summary["daily_available"],
-        "budget_usage_percentage": summary["budget_usage_percentage"],
-        "category_totals": summary["category_totals"],
-        "recent_expenses": summary["recent_expenses"],
-    }
+    summary = DashboardService().get_monthly_summary(month)
+    budget = summary.pop("budget")
+    return {**summary, "budget_amount": budget, "monthly_budget": budget}

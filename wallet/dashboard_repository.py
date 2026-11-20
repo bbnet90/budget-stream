@@ -1,22 +1,52 @@
-import sqlite3
+from contextlib import contextmanager
+from copy import copy
+from decimal import Decimal
 from typing import Any
 
 from .config import get_db_path
+
+
+from .db import database_session
+
+
+class DecimalSum:
+    def __init__(self):
+        self.total = Decimal(0)
+
+    def step(self, amount):
+        self.total += Decimal(str(amount))
+
+    def finalize(self):
+        return float(self.total)
 
 
 class DashboardRepository:
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or str(get_db_path())
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    _connection = None
+
+    @contextmanager
+    def _connect(self):
+        if self._connection is not None:
+            yield self._connection
+        else:
+            with database_session(self.db_path) as connection:
+                connection.create_aggregate("decimal_sum", 1, DecimalSum)
+                yield connection
+
+    @contextmanager
+    def snapshot(self):
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            reader = copy(self)
+            reader._connection = connection
+            yield reader
 
     def get_total_income_for_month(self, month: str) -> float:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT COALESCE(SUM(amount), 0) FROM income WHERE month = ?",
+                "SELECT COALESCE(decimal_sum(amount), 0) FROM income WHERE month = ?",
                 (month,),
             ).fetchone()
 
@@ -48,9 +78,9 @@ class DashboardRepository:
             row = connection.execute(
                 """
                 SELECT
-                    COALESCE(SUM(amount), 0) AS total_expenses,
-                    COALESCE(SUM(CASE WHEN is_required = 1 THEN amount ELSE 0 END), 0) AS required_expenses,
-                    COALESCE(SUM(CASE WHEN is_required = 0 THEN amount ELSE 0 END), 0) AS discretionary_expenses
+                    COALESCE(decimal_sum(amount), 0) AS total_expenses,
+                    COALESCE(decimal_sum(CASE WHEN is_required = 1 THEN amount ELSE 0 END), 0) AS required_expenses,
+                    COALESCE(decimal_sum(CASE WHEN is_required = 0 THEN amount ELSE 0 END), 0) AS discretionary_expenses
                 FROM expenses
                 WHERE substr(expense_date, 1, 7) = ?
                 """,
@@ -76,28 +106,16 @@ class DashboardRepository:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT c.name AS category_name,
-                       COALESCE(SUM(CASE WHEN substr(e.expense_date, 1, 7) = ? THEN e.amount ELSE 0 END), 0) AS total_amount
-                FROM categories c
-                LEFT JOIN expenses e ON e.category_id = c.id
+                SELECT c.name AS category, decimal_sum(e.amount) AS total
+                FROM expenses e JOIN categories c ON c.id = e.category_id
+                WHERE substr(e.expense_date, 1, 7) = ?
                 GROUP BY c.id, c.name
-                HAVING total_amount > 0
-                ORDER BY total_amount DESC, c.name ASC
+                ORDER BY total DESC, c.name ASC
                 """,
                 (month,),
             ).fetchall()
 
-        items: list[dict[str, Any]] = []
-        for row in rows:
-            amount = float(row["total_amount"] or 0)
-            if amount == 0:
-                continue
-            items.append({
-                "category": row["category_name"],
-                "total": amount,
-            })
-
-        return items
+        return [dict(row) for row in rows]
 
     def get_recent_expenses_for_month(self, month: str, limit: int = 5) -> list[dict[str, Any]]:
         with self._connect() as connection:

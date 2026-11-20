@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from .dashboard_repository import DashboardRepository
 from .services import current_month_key
 
@@ -10,12 +12,13 @@ class ReportService:
 
     def get_current_report(self, month: str | None = None) -> dict:
         target_month = month or current_month_key()
-        total_income = self.repository.get_total_income_for_month(target_month)
-        expense_totals = self.repository.get_expense_totals_for_month(target_month)
+        with self.repository.snapshot() as reader:
+            total_income = reader.get_total_income_for_month(target_month)
+            expense_totals = reader.get_expense_totals_for_month(target_month)
+            monthly_budget = reader.get_budget_for_month(target_month)
+            category_totals = reader.get_category_totals_for_month(target_month)
         total_expenses = expense_totals["total_expenses"]
-        monthly_budget = self.repository.get_budget_for_month(target_month)
-        remaining_budget = monthly_budget - total_expenses
-        category_totals = self.repository.get_category_totals_for_month(target_month)
+        remaining_budget = float(Decimal(str(monthly_budget)) - Decimal(str(total_expenses)))
 
         expense_to_income_percentage = 0.0 if total_income == 0 else (total_expenses / total_income) * 100
         required_share_percentage = 0.0 if total_expenses == 0 else (expense_totals["required_expenses"] / total_expenses) * 100
@@ -41,7 +44,7 @@ class ReportService:
             "income_vs_expense": {
                 "total_income": total_income,
                 "total_expenses": total_expenses,
-                "net_cash_flow": total_income - total_expenses,
+                "net_cash_flow": float(Decimal(str(total_income)) - Decimal(str(total_expenses))),
                 "expense_to_income_percentage": round(expense_to_income_percentage, 2),
             },
             "expense_breakdown": {

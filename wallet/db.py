@@ -1,4 +1,7 @@
+import os
 import sqlite3
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 from .config import get_db_path
@@ -72,27 +75,49 @@ DEFAULT_CATEGORIES = [
 ]
 
 
-def get_connection() -> sqlite3.Connection:
-    connection = sqlite3.connect(get_db_path())
+def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
+    path = db_path if db_path is not None else get_db_path()
+    if str(path) not in ("", ":memory:"):
+        # SQLite otherwise creates a new database with the process's default permissions.
+        try:
+            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(descriptor)
+    connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON;")
     return connection
 
 
+@contextmanager
+def database_session(db_path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
+    with closing(get_connection(db_path)) as connection, connection:
+        yield connection
+
+
 def initialize_database() -> Path:
     db_path = get_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    missing = []
+    for directory in db_path.parents:
+        if directory.is_dir():
+            break
+        missing.append(directory)
+    for directory in reversed(missing):
+        directory.mkdir(mode=0o700, exist_ok=True)
 
-    with sqlite3.connect(db_path) as connection:
-        connection.execute("PRAGMA foreign_keys = ON;")
-        connection.executescript(SCHEMA)
+    with database_session(db_path) as connection:
+        connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(categories)")}
+        if "default_kind" in columns and "kind" not in columns:
+            connection.execute("ALTER TABLE categories RENAME COLUMN default_kind TO kind")
 
-        for name, kind in DEFAULT_CATEGORIES:
-            connection.execute(
-                "INSERT OR IGNORE INTO categories (name, kind, is_default) VALUES (?, ?, 1)",
-                (name, kind),
-            )
-
-        connection.commit()
+        connection.executemany(
+            """INSERT INTO categories (name, kind, is_default)
+               SELECT :name, :kind, 1
+               WHERE NOT EXISTS (SELECT 1 FROM categories WHERE name = :name)""",
+            ({"name": name, "kind": kind} for name, kind in DEFAULT_CATEGORIES),
+        )
 
     return db_path

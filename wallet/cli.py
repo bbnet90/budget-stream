@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import sqlite3
+from contextlib import contextmanager
 from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from . import __version__
 from .budget_service import BudgetService
@@ -19,12 +22,22 @@ from .report_service import ReportService
 from .services import current_month_label
 
 app = typer.Typer(
-    help="Personal budget management CLI.",
+    help="Personal finance CLI for budgets, income, expenses, and recurring transactions.",
     add_completion=False,
     invoke_without_command=True,
 )
 
-console = Console()
+console = Console(markup=False, emoji=False)
+
+
+@contextmanager
+def command_database():
+    try:
+        initialize_database()
+        yield
+    except (ValueError, sqlite3.Error, OSError) as exc:
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
 
 
 def version_callback(value: bool):
@@ -36,7 +49,7 @@ def version_callback(value: bool):
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    version: Optional[bool] = typer.Option(
+    version: bool = typer.Option(
         None,
         "--version",
         callback=version_callback,
@@ -48,15 +61,15 @@ def main(
         render_dashboard()
 
 
-@app.command("dashboard")
+@app.command("dashboard", help="Show the current monthly dashboard summary.")
 def dashboard():
     render_dashboard()
 
 
-@app.command("report")
+@app.command("report", help="Show the current month income, expense, and budget summary.")
 def report():
-    initialize_database()
-    report_data = ReportService().get_current_report()
+    with command_database():
+        report_data = ReportService().get_current_report()
 
     income_vs_expense = Table(title="Income vs Expense")
     income_vs_expense.add_column("Metric", style="cyan")
@@ -104,34 +117,34 @@ def report():
 
 
 def render_dashboard() -> None:
-    initialize_database()
-    summary = DashboardService().get_monthly_summary()
+    with command_database():
+        summary = DashboardService().get_monthly_summary()
     month_label = summary["month_label"]
 
     summary_lines = [
         "[bold]BudgetStream[/bold]",
         month_label,
         "",
-        f"Total income: {summary['total_income']:,.0f}",
-        f"Monthly budget: {summary['budget']:,.0f}",
-        f"Total expenses: {summary['total_expenses']:,.0f}",
+        f"Total income: {summary['total_income']:,.2f}",
+        f"Monthly budget: {summary['budget']:,.2f}",
+        f"Total expenses: {summary['total_expenses']:,.2f}",
         f"Expense Count: {summary['expense_count']}",
         f"Budget Usage: {summary['budget_usage_percentage']:.1f}%",
-        f"Remaining budget: {summary['remaining_budget']:,.0f}",
+        f"Remaining budget: {summary['remaining_budget']:,.2f}",
         f"Days Remaining: {summary['days_remaining']}",
         f"Daily Available: {summary['daily_available']:,.2f}",
-        f"Required expenses: {summary['required_expenses']:,.0f}",
-        f"Discretionary expenses: {summary['discretionary_expenses']:,.0f}",
+        f"Required expenses: {summary['required_expenses']:,.2f}",
+        f"Discretionary expenses: {summary['discretionary_expenses']:,.2f}",
     ]
 
-    console.print(Panel.fit("\n".join(summary_lines), border_style="green"))
+    console.print(Panel.fit(Text.from_markup("\n".join(summary_lines)), border_style="green"))
 
     if summary["category_totals"]:
         category_table = Table(title="Category totals")
         category_table.add_column("Category", style="cyan")
         category_table.add_column("Total", style="green", justify="right")
         for item in summary["category_totals"]:
-            category_table.add_row(item["category"], f"{item['total']:,.0f}")
+            category_table.add_row(item["category"], f"{item['total']:,.2f}")
         console.print(category_table)
 
     if summary["recent_expenses"]:
@@ -144,20 +157,20 @@ def render_dashboard() -> None:
             expense_table.add_row(
                 item["date"],
                 item["category"],
-                f"{item['amount']:,.0f}",
+                f"{item['amount']:,.2f}",
                 "Yes" if item["is_required"] else "No",
             )
         console.print(expense_table)
 
 
-category_app = typer.Typer(help="Manage expense categories.")
+category_app = typer.Typer(help="Manage spending categories used by expenses.")
 app.add_typer(category_app, name="category")
 
 
 @category_app.command("list")
 def category_list():
-    initialize_database()
-    categories = CategoryService().list_categories()
+    with command_database():
+        categories = CategoryService().list_categories()
 
     if not categories:
         console.print("No categories found.")
@@ -183,13 +196,8 @@ def category_add(
     name: str = typer.Option(..., "--name", help="Category name."),
     kind: str = typer.Option(..., "--kind", help="Category kind: required or discretionary."),
 ):
-    initialize_database()
-
-    try:
+    with command_database():
         category = CategoryService().add_category(name, kind)
-    except ValueError as exc:
-        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
 
     typer.secho(f'✓ Category "{category["name"]}" added.', fg=typer.colors.GREEN)
 
@@ -198,18 +206,13 @@ def category_add(
 def category_remove(
     name: str = typer.Option(..., "--name", help="Category name to remove."),
 ):
-    initialize_database()
-
-    try:
+    with command_database():
         CategoryService().delete_category(name)
-    except ValueError as exc:
-        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
 
     typer.secho(f'✓ Category "{name}" removed.', fg=typer.colors.GREEN)
 
 
-budget_app = typer.Typer(help="Manage the monthly budget.")
+budget_app = typer.Typer(help="Set and view the current month's budget.")
 app.add_typer(budget_app, name="budget")
 
 
@@ -217,22 +220,17 @@ app.add_typer(budget_app, name="budget")
 def budget_set(
     amount: float = typer.Option(..., "--amount", help="Monthly budget amount."),
 ):
-    initialize_database()
-
-    try:
+    with command_database():
         budget = BudgetService().set_budget(amount)
-    except ValueError as exc:
-        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
 
     month_label = current_month_label()
-    typer.secho(f'✓ Monthly budget set for {month_label}: {budget["monthly_budget"]:,.0f}', fg=typer.colors.GREEN)
+    typer.secho(f'✓ Monthly budget set for {month_label}: {budget["monthly_budget"]:,.2f}', fg=typer.colors.GREEN)
 
 
 @budget_app.command("show")
 def budget_show():
-    initialize_database()
-    budget = BudgetService().get_current_budget()
+    with command_database():
+        budget = BudgetService().get_current_budget()
 
     if budget is None:
         typer.secho(f"No budget is set for {current_month_label()}.", fg=typer.colors.YELLOW)
@@ -241,11 +239,11 @@ def budget_show():
     table = Table(title="Monthly Budget")
     table.add_column("Month", style="cyan")
     table.add_column("Budget", style="green", justify="right")
-    table.add_row(current_month_label(), f"{budget['monthly_budget']:,.0f}")
+    table.add_row(current_month_label(), f"{budget['monthly_budget']:,.2f}")
     console.print(table)
 
 
-income_app = typer.Typer(help="Manage monthly income.")
+income_app = typer.Typer(help="Record and review monthly income.")
 app.add_typer(income_app, name="income")
 
 
@@ -254,24 +252,19 @@ def income_add(
     source: str = typer.Option(..., "--source", help="Income source name."),
     amount: float = typer.Option(..., "--amount", help="Income amount."),
 ):
-    initialize_database()
-
-    try:
+    with command_database():
         income = IncomeService().add_income(source, amount)
-    except ValueError as exc:
-        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
 
     typer.secho(
-        f'✓ Income added for {income["source_name"]}: {income["amount"]:,.0f}',
+        f'✓ Income added for {income["source_name"]}: {income["amount"]:,.2f}',
         fg=typer.colors.GREEN,
     )
 
 
 @income_app.command("list")
 def income_list():
-    initialize_database()
-    entries = IncomeService().list_current_month_income()
+    with command_database():
+        entries = IncomeService().list_current_month_income()
 
     if not entries:
         typer.secho(f"No income entries for {current_month_label()}.", fg=typer.colors.YELLOW)
@@ -282,12 +275,12 @@ def income_list():
     table.add_column("Amount", style="green", justify="right")
 
     for entry in entries:
-        table.add_row(entry["source_name"], f"{entry['amount']:,.0f}")
+        table.add_row(entry["source_name"], f"{entry['amount']:,.2f}")
 
     console.print(table)
 
 
-expense_app = typer.Typer(help="Manage monthly expenses.")
+expense_app = typer.Typer(help="Record and review monthly expenses.")
 app.add_typer(expense_app, name="expense")
 
 
@@ -297,24 +290,19 @@ def expense_add(
     category: str = typer.Option(..., "--category", help="Existing category name."),
     description: Optional[str] = typer.Option(None, "--description", help="Optional expense description."),
 ):
-    initialize_database()
-
-    try:
+    with command_database():
         expense = ExpenseService().add_expense(amount, category, description=description)
-    except ValueError as exc:
-        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
 
     typer.secho(
-        f'✓ Expense added: {expense["amount"]:,.0f} — {expense["category_name"]}',
+        f'✓ Expense added: {expense["amount"]:,.2f} — {expense["category_name"]}',
         fg=typer.colors.GREEN,
     )
 
 
 @expense_app.command("list")
 def expense_list():
-    initialize_database()
-    expenses = ExpenseService().list_current_month_expenses()
+    with command_database():
+        expenses = ExpenseService().list_current_month_expenses()
 
     if not expenses:
         typer.secho(f"No expenses for {current_month_label()}.", fg=typer.colors.YELLOW)
@@ -333,7 +321,7 @@ def expense_list():
             str(expense["id"]),
             expense["expense_date"],
             expense["category_name"],
-            f"{expense['amount']:,.0f}",
+            f"{expense['amount']:,.2f}",
             expense["description"] or "",
             "Yes" if expense["is_required"] else "No",
         )
@@ -345,18 +333,13 @@ def expense_list():
 def expense_delete(
     expense_id: int = typer.Option(..., "--id", help="Expense ID to delete."),
 ):
-    initialize_database()
-
-    try:
+    with command_database():
         ExpenseService().delete_expense(expense_id)
-    except ValueError as exc:
-        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
 
     typer.secho(f"✓ Expense #{expense_id} deleted.", fg=typer.colors.GREEN)
 
 
-recurring_app = typer.Typer(help="Manage recurring income and expense definitions.")
+recurring_app = typer.Typer(help="Create, review, and apply recurring income or expense definitions.")
 app.add_typer(recurring_app, name="recurring")
 
 
@@ -370,9 +353,7 @@ def recurring_add(
     frequency: str = typer.Option("monthly", "--frequency", help="Recurring cadence."),
     next_run: str = typer.Option(..., "--next-run", help="Next run date in YYYY-MM-DD format."),
 ):
-    initialize_database()
-
-    try:
+    with command_database():
         entry = RecurringService().add_recurring(
             type_=type_,
             source_name=source,
@@ -382,9 +363,6 @@ def recurring_add(
             frequency=frequency,
             next_run_date=next_run,
         )
-    except ValueError as exc:
-        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
 
     label = entry["source_name"] or entry["category_name"] or entry["description"] or "Recurring"
     typer.secho(f'✓ Recurring {entry["type"]} added: {label}', fg=typer.colors.GREEN)
@@ -392,8 +370,8 @@ def recurring_add(
 
 @recurring_app.command("list")
 def recurring_list():
-    initialize_database()
-    entries = RecurringService().list_recurring()
+    with command_database():
+        entries = RecurringService().list_recurring()
 
     if not entries:
         typer.secho("No recurring transactions configured.", fg=typer.colors.YELLOW)
@@ -414,7 +392,7 @@ def recurring_list():
             str(entry["id"]),
             entry["type"].title(),
             name,
-            f"{entry['amount']:,.0f}",
+            f"{entry['amount']:,.2f}",
             entry["next_run_date"],
             status,
         )
@@ -426,8 +404,9 @@ def recurring_list():
 def recurring_enable(
     recurring_id: int = typer.Option(..., "--id", help="Recurring ID to enable."),
 ):
-    initialize_database()
-    RecurringService().enable_recurring(recurring_id)
+    with command_database():
+        RecurringService().enable_recurring(recurring_id)
+
     typer.secho(f"✓ Recurring #{recurring_id} enabled.", fg=typer.colors.GREEN)
 
 
@@ -435,8 +414,9 @@ def recurring_enable(
 def recurring_disable(
     recurring_id: int = typer.Option(..., "--id", help="Recurring ID to disable."),
 ):
-    initialize_database()
-    RecurringService().disable_recurring(recurring_id)
+    with command_database():
+        RecurringService().disable_recurring(recurring_id)
+
     typer.secho(f"✓ Recurring #{recurring_id} disabled.", fg=typer.colors.GREEN)
 
 
@@ -444,15 +424,16 @@ def recurring_disable(
 def recurring_delete(
     recurring_id: int = typer.Option(..., "--id", help="Recurring ID to delete."),
 ):
-    initialize_database()
-    RecurringService().delete_recurring(recurring_id)
+    with command_database():
+        RecurringService().delete_recurring(recurring_id)
+
     typer.secho(f"✓ Recurring #{recurring_id} deleted.", fg=typer.colors.GREEN)
 
 
 @recurring_app.command("apply")
 def recurring_apply():
-    initialize_database()
-    applied = RecurringService().apply_due_recurring()
+    with command_database():
+        applied = RecurringService().apply_due_recurring()
     if not applied:
         typer.secho("No recurring transactions were due to apply; nothing was applied.", fg=typer.colors.YELLOW)
         return

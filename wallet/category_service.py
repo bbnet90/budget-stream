@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 from .category_repository import CategoryRepository
 
 VALID_KINDS = {"required", "discretionary"}
@@ -34,11 +36,12 @@ class CategoryService:
         cleaned_name = self.normalize_name(name)
         cleaned_kind = self.normalize_kind(kind)
 
-        existing = self.repository.get_category_by_name(cleaned_name)
-        if existing is not None:
-            raise ValueError(f'Category "{cleaned_name}" already exists.')
-
-        return self.repository.add_category(cleaned_name, cleaned_kind, is_default=False)
+        try:
+            return self.repository.add_category(cleaned_name, cleaned_kind)
+        except sqlite3.IntegrityError as exc:
+            if exc.sqlite_errorcode == sqlite3.SQLITE_CONSTRAINT_UNIQUE:
+                raise ValueError(f'Category "{cleaned_name}" already exists.') from exc
+            raise
 
     def delete_category(self, name: str) -> bool:
         cleaned_name = self.normalize_name(name)
@@ -50,10 +53,12 @@ class CategoryService:
         if category["is_default"]:
             raise ValueError(f'default category "{cleaned_name}" cannot be deleted.')
 
-        if self.repository.has_expenses(category["id"]):
-            raise ValueError(
-                f'Category "{cleaned_name}" cannot be deleted because it is referenced by one or more expenses.'
-            )
-
-        self.repository.delete_category(category["id"])
+        try:
+            self.repository.delete_category(category["id"])
+        except sqlite3.IntegrityError as exc:
+            if exc.sqlite_errorcode == sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY:
+                raise ValueError(
+                    f'Category "{cleaned_name}" cannot be deleted while an expense or recurring transaction uses it.'
+                ) from exc
+            raise
         return True
